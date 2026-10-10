@@ -2,7 +2,66 @@
 
 A full-stack proof of concept for movie search with **Elasticsearch 8**, a **Node.js/Express API**, and a **Vue 3 + Vite frontend**. Movie data is ingested from TMDB.
 
-The repository demonstrates index mapping and analysis, bulk ingestion, full-text search, relevance boosts, filters, facets, highlighting, autocomplete, and a small search UI.
+The project demonstrates:
+
+- Elasticsearch indexing and custom analyzers
+- TMDB movie ingestion with bulk indexing
+- Full-text search and relevance boosts
+- Fuzzy search and search operators
+- Autocomplete suggestions
+- Faceted filtering and pagination
+- Search-result highlighting
+- Express API as a search proxy
+- Vue 3 frontend
+- Search API contract validation
+- Stable result ordering
+
+## Architecture
+
+The Vue frontend sends HTTP requests to the Express API. The API translates search parameters into Elasticsearch queries. The ingestion script independently fetches movie data from TMDB and bulk-indexes it into the `movies` index.
+
+```text
+                    ┌─────────────────┐
+                    │   Vue 3 + Vite  │
+                    │    Frontend     │
+                    └────────┬────────┘
+                             │
+                             │ HTTP (/api → Express)
+                             ▼
+                    ┌─────────────────┐
+                    │   Express API   │
+                    │    Backend      │
+                    └────────┬────────┘
+                             │
+                             │ Elasticsearch Query DSL
+                             ▼
+                    ┌─────────────────┐
+                    │ Elasticsearch   │
+                    │  movies index   │
+                    └────────▲────────┘
+                             │
+                             │ bulk indexing
+                    ┌────────┴────────┐
+                    │    Ingestion    │
+                    │  Node.js + TMDB │
+                    └────────▲────────┘
+                             │
+                             │ HTTP API
+                             │
+                    ┌────────┴────────┐
+                    │     TMDB API    │
+                    │  Movie metadata │
+                    └─────────────────┘
+```
+
+## Prerequisites
+
+- Docker and Docker Compose
+- Node.js 18 or newer and npm
+- A TMDB API key or API Read Access Token
+- `jq` for the optional terminal examples that pipe responses through `jq`
+
+Elasticsearch is configured for a local, single-node POC and has security disabled. **Do not expose this setup to a public network or use it as a production deployment.**
 
 ## Prerequisites
 
@@ -70,7 +129,7 @@ make ingest
 
 The `ingest` target requires the index to already exist. Both modes use each movie's TMDB ID as the Elasticsearch document ID, so re-ingesting the same movie updates the existing document rather than creating a duplicate.
 
-The default page count is configured by `PAGES=5` in `ingestion/.env`; each TMDB page contains up to 20 movies. For example, set `PAGES=25` for about 500 movies. You can also pass an explicit page count directly:
+The example environment file sets `PAGES=5`; each TMDB page contains up to 20 movie records. Set `PAGES=50` in `ingestion/.env` to request 50 pages (up to 1,000 indexing operations), or use an explicit command-line page count:
 
 ```bash
 cd ingestion
@@ -121,7 +180,7 @@ Run `make` or inspect the root `Makefile` to see the available targets.
 
 ## Ingestion details
 
-The script in `ingestion/seed.js` fetches the TMDB genre list and popular-movie pages, maps genre IDs to names, prepares each document, and bulk-indexes the documents into Elasticsearch. It refreshes the index after ingestion and reports the document count.
+The script in `ingestion/seed.js` fetches the TMDB genre list and popular-movie pages, maps genre IDs to names, prepares each document, and bulk-indexes the documents into Elasticsearch. It refreshes the index after ingestion and reports both successful indexing operations and the final document count.
 
 Indexed documents include fields such as:
 
@@ -131,7 +190,7 @@ Indexed documents include fields such as:
 - `year`, `release_date`, `popularity`, `vote_average`
 - `poster_url`, `poster_path`, `backdrop_path`
 
-Bulk item failures are reported with document IDs and reasons. If any documents fail to index, the script exits with a non-zero status.
+Bulk item failures are reported with document IDs and reasons. If any documents fail to index, the script exits with a non-zero status. The `indexed` summary counts successful indexing operations, while the final `count` reports unique documents in the index. These numbers can differ because TMDB popular pages may contain the same movie more than once and the TMDB ID is used as the Elasticsearch document ID; indexing a repeated ID updates that document instead of creating a duplicate. For example, 1,000 successful operations ending with 977 documents means repeated IDs were updated, not that 23 indexing operations failed.
 
 ## Elasticsearch mapping and analysis
 
