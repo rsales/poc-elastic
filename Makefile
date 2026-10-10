@@ -6,15 +6,38 @@ ES_URL ?= http://localhost:9200
 BACKEND_URL ?= http://localhost:3000
 INDEX ?= movies
 
-.PHONY: help setup up down logs wait-es health elastic kibana \
+.PHONY: help setup setup-env setup-backend setup-ingestion setup-frontend \
+        up down logs wait-es health elastic kibana \
         install install-backend install-ingestion install-frontend \
         ingest ingest-reset test test-backend build verify \
         backend frontend index-info api-smoke smoke
 
 help: ## List available local development commands
-	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-setup: up wait-es install ## Start infrastructure, wait for Elasticsearch, and install dependencies
+setup: ## Create env files, start Elasticsearch, install all dependencies
+	$(MAKE) setup-env
+	$(MAKE) up
+	$(MAKE) wait-es
+	$(MAKE) setup-backend
+	$(MAKE) setup-ingestion
+	$(MAKE) setup-frontend
+
+setup-env: ## Create local env files from examples without overwriting existing files
+	@test -f backend/.env || cp backend/.env.example backend/.env
+	@test -f ingestion/.env || cp ingestion/.env.example ingestion/.env
+	@echo "Environment files ready. Add TMDB_API_KEY to ingestion/.env before ingesting."
+
+setup-backend: ## Install Express backend dependencies
+	$(MAKE) setup-env
+	$(MAKE) install-backend
+
+setup-ingestion: ## Install TMDB ingestion dependencies
+	$(MAKE) setup-env
+	$(MAKE) install-ingestion
+
+setup-frontend: ## Install Vue/Vite frontend dependencies
+	$(MAKE) install-frontend
 
 up: ## Start Elasticsearch and Kibana
 	docker compose up -d
@@ -62,7 +85,7 @@ ingest-reset: wait-es ## Recreate the index and ingest movies (requires CONFIRM_
 	@test "$(CONFIRM_RESET)" = "1" || (echo "Destructive: this recreates the configured Elasticsearch index. Run: make ingest-reset CONFIRM_RESET=1 [PAGES=25]" >&2; exit 1)
 	cd ingestion && npm run seed -- --reset $(if $(PAGES),--pages=$(PAGES),)
 
-test: test-backend ## Run all currently configured automated tests
+test: test-backend ## Run all configured backend tests
 
 test-backend: ## Run Express API contract tests
 	cd backend && npm test
@@ -78,7 +101,7 @@ backend: ## Start the Express API
 frontend: ## Start the Vite development server
 	cd frontend && npm run dev
 
-index-info: ## Show Elasticsearch metadata for the movies index
+index-info: ## Show Elasticsearch metadata for the configured index
 	curl --silent --show-error --fail "$(ES_URL)/_cat/indices/$(INDEX)?v"
 
 api-smoke: ## Check health, search, and suggestions (backend must be running)
