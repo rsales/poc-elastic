@@ -1,91 +1,77 @@
 # Elasticsearch POC
 
-A full-stack proof of concept for movie search with **Elasticsearch 8**, a **Node.js/Express API**, and a **Vue 3 + Vite frontend**. Movie data is ingested from TMDB.
+A full-stack movie-search proof of concept using **Elasticsearch 8**, a **Node.js/Express API**, and a **Vue 3 + Vite frontend**. Movie metadata is sourced from TMDB.
 
-The project demonstrates:
+This repository is the Node implementation of the search experiments being compared with [ror-elastic](https://github.com/rsales/ror-elastic). Both POCs share behavior scenarios under `contracts/search-cases.json`; implementation-specific response envelopes remain compatible with their existing frontends.
 
-- Elasticsearch indexing and custom analyzers
-- TMDB movie ingestion with bulk indexing
-- Full-text search and relevance boosts
-- Fuzzy search and search operators
-- Autocomplete suggestions
-- Faceted filtering and pagination
-- Search-result highlighting
-- Express API as a search proxy
-- Vue 3 frontend
-- Search API contract validation
-- Stable result ordering
+## Capabilities
+
+- TMDB ingestion with Elasticsearch bulk indexing
+- English text analysis, stemming and accent folding
+- Full-text search, field boosts and phrase ranking
+- Quoted phrases, required/excluded terms, wildcard and fuzzy query syntax
+- Completion-based autocomplete
+- Genre and minimum-rating filters
+- Genre and five-year histogram facets
+- Highlighting, pagination and deterministic ordering
+- API parameter validation and normalized errors
+- Shared search-contract fixtures
 
 ## Architecture
 
-The Vue frontend sends HTTP requests to the Express API. The API translates search parameters into Elasticsearch queries. The ingestion script independently fetches movie data from TMDB and bulk-indexes it into the `movies` index.
+The Vue frontend calls Express over HTTP. The API translates request parameters into Elasticsearch Query DSL. The separate ingestion script fetches TMDB movie metadata and bulk-indexes it into the `movies` index.
 
 ```text
                     ┌─────────────────┐
                     │   Vue 3 + Vite  │
                     │    Frontend     │
                     └────────┬────────┘
-                             │
-                             │ HTTP (/api → Express)
+                             │ HTTP (/api → Vite proxy → Express)
                              ▼
                     ┌─────────────────┐
                     │   Express API   │
                     │    Backend      │
                     └────────┬────────┘
-                             │
                              │ Elasticsearch Query DSL
                              ▼
                     ┌─────────────────┐
                     │ Elasticsearch   │
                     │  movies index   │
                     └────────▲────────┘
-                             │
                              │ bulk indexing
                     ┌────────┴────────┐
                     │    Ingestion    │
                     │  Node.js + TMDB │
                     └────────▲────────┘
-                             │
                              │ HTTP API
-                             │
-                    ┌────────┴────────┐
+                             ▼
+                    ┌─────────────────┐
                     │     TMDB API    │
-                    │  Movie metadata │
                     └─────────────────┘
 ```
 
 ## Prerequisites
 
 - Docker and Docker Compose
-- Node.js 18 or newer and npm
-- A TMDB API key or API Read Access Token
-- `jq` for the optional terminal examples that pipe responses through `jq`
+- Node.js 18+ and npm
+- A TMDB v3 API key or v4 Read Access Token
+- `curl`; `jq` is optional for formatted terminal output
 
-Elasticsearch is configured for a local, single-node POC and has security disabled. **Do not expose this setup to a public network or use it as a production deployment.**
-
-## Prerequisites
-
-- Docker and Docker Compose
-- Node.js 18 or newer and npm
-- A TMDB API key or API Read Access Token
-- `jq` for the optional terminal examples that pipe responses through `jq`
-
-Elasticsearch is configured for a local, single-node POC and has security disabled. **Do not expose this setup to a public network or use it as a production deployment.**
+Elasticsearch is configured for a local single-node POC with security disabled. Do not expose this stack to a public network or use it as a production deployment.
 
 ## Quick start
 
-Run the commands below from the repository root.
+Run all commands from the repository root.
 
 ### 1. Configure environment variables
 
 Create local environment files from the examples:
 
 ```bash
-cp ingestion/.env.example ingestion/.env
-cp backend/.env.example backend/.env
+make setup-env
 ```
 
-Edit `ingestion/.env` and set `TMDB_API_KEY`. The ingestion script accepts a TMDB v4 Read Access Token or a v3 API key. Keep local `.env` files private; never commit credentials.
+The command creates `backend/.env` and `ingestion/.env` only when they do not already exist. Add your TMDB API key or v4 Read Access Token to `ingestion/.env`. Do not commit local `.env` files or credentials.
 
 ### 2. Start services and install dependencies
 
@@ -93,58 +79,64 @@ Edit `ingestion/.env` and set `TMDB_API_KEY`. The ingestion script accepts a TMD
 make setup
 ```
 
-This starts Elasticsearch and Kibana through Docker Compose and installs dependencies for the ingestion script, backend, and frontend.
-
-Wait for Elasticsearch to become ready:
-
-```bash
-make health
-curl -s http://localhost:9200/_cluster/health | jq
-```
-
-Default local URLs:
+This creates any missing environment files, starts Elasticsearch and Kibana, waits for Elasticsearch, and installs backend, ingestion and frontend dependencies. It does not ingest movies automatically.
 
 | Service | URL |
 | --- | --- |
 | Elasticsearch | http://localhost:9200 |
 | Kibana | http://localhost:5601 |
-| Backend API | http://localhost:3000 |
-| Frontend | http://localhost:5173 |
+| Express API | http://localhost:3000 |
+| Vue/Vite frontend | http://localhost:5173 |
+
+Check Elasticsearch:
+
+```bash
+make health
+```
 
 ### 3. Ingest movie data
 
-For a first run, recreate the index and ingest the default five TMDB pages (usually about 100 movies):
+For a fresh index, recreate the index and then ingest the default page count configured in `ingestion/.env` (currently 5 pages, up to about 100 records):
 
 ```bash
-make ingest-reset
+make ingest-reset CONFIRM_RESET=1
 ```
 
-**Warning:** `make ingest-reset` deletes and recreates the configured index before ingesting data. Use it only when replacing the existing contents is acceptable. The index mapping is loaded from `mappings/movies.json`.
+**Warning:** `ingest-reset` deletes and recreates the configured Elasticsearch index before ingestion. Use it only when replacing the existing index contents is acceptable.
 
-To ingest or update movies without deleting the index:
+To ingest or update data without deleting the index:
 
 ```bash
 make ingest
 ```
 
-The `ingest` target requires the index to already exist. Both modes use each movie's TMDB ID as the Elasticsearch document ID, so re-ingesting the same movie updates the existing document rather than creating a duplicate.
-
-The example environment file sets `PAGES=5`; each TMDB page contains up to 20 movie records. Set `PAGES=50` in `ingestion/.env` to request 50 pages (up to 1,000 indexing operations), or use an explicit command-line page count:
+Both modes use the TMDB ID as Elasticsearch `_id`; repeated movie IDs update the same document. Set the page count in `ingestion/.env` or override it for a command:
 
 ```bash
-cd ingestion
-npm run seed -- --reset --pages=25
+make ingest PAGES=25
+make ingest-reset CONFIRM_RESET=1 PAGES=25
 ```
 
-### 4. Test the backend and run the app
+### 4. Prepare, test, and run the apps
 
-Run the backend's validation tests:
+Install only one part of the project when needed:
+
+```bash
+make setup-backend
+make setup-ingestion
+make setup-frontend
+```
+
+Run backend tests and build the frontend:
 
 ```bash
 make test
+make build
+# Or both:
+make verify
 ```
 
-Start the backend and frontend in **separate terminals**:
+Start the Express API and frontend in **separate terminals**:
 
 ```bash
 make backend
@@ -154,59 +146,44 @@ make backend
 make frontend
 ```
 
-Open http://localhost:5173.
-
-The Vite dev server proxies requests from `/api/*` to the backend at `http://localhost:3000`. To stop a foreground process, press `Ctrl+C`.
+Open http://localhost:5173. The Vite dev server proxies `/api/*` requests to Express at port 3000. Use `Ctrl+C` to stop each foreground process.
 
 ## Makefile commands
 
-Run `make` or inspect the root `Makefile` to see the available targets.
+Run `make help` to list targets. The command names intentionally match the Rails POC where their purposes overlap.
 
 | Command | Description |
 | --- | --- |
-| `make setup` | Start Docker services and install all npm dependencies |
-| `make up` | Start Elasticsearch and Kibana |
-| `make down` | Stop containers; preserves the named Elasticsearch data volume |
-| `make logs` | Follow Docker Compose logs |
-| `make health` | Request the Elasticsearch root endpoint |
-| `make elastic` | Open Elasticsearch in the browser (macOS) |
-| `make kibana` | Open Kibana in the browser (macOS) |
-| `make install` | Install backend, ingestion, and frontend dependencies |
+| `make setup` | Create env files, start infrastructure, wait for Elasticsearch and install dependencies |
+| `make setup-env` | Create local env files without overwriting existing files |
+| `make setup-backend` | Configure env and install Express dependencies |
+| `make setup-ingestion` | Configure env and install TMDB ingestion dependencies |
+| `make setup-frontend` | Install Vue/Vite dependencies |
+| `make up` / `make down` | Start/stop Elasticsearch and Kibana; data volume is preserved |
+| `make wait-es` / `make health` | Wait for Elasticsearch / display cluster health |
+| `make install` | Install all Node.js dependencies |
+| `make ingest PAGES=25` | Ingest/update TMDB movies without resetting the index |
+| `make ingest-reset CONFIRM_RESET=1 PAGES=25` | Recreate the index and ingest data |
+| `make sync PAGES=25` / `make sync-reset CONFIRM_RESET=1 PAGES=25` | Rails-compatible aliases for ingest commands |
 | `make test` | Run backend tests |
-| `make ingest` | Ingest/update data without resetting the index |
-| `make ingest-reset` | Delete and recreate the index, then ingest data |
-| `make backend` | Start the Express backend |
-| `make frontend` | Start the Vite development server |
+| `make build` / `make verify` | Build frontend / run tests and build |
+| `make backend` / `make frontend` | Start Express / Vite |
+| `make index-info` | Inspect the configured Elasticsearch index |
+| `make api-smoke` | Check health, browse search and suggestions |
 
-## Ingestion details
+`ES_URL`, `BACKEND_URL`, and `INDEX` can override the defaults for the local helper commands.
 
-The script in `ingestion/seed.js` fetches the TMDB genre list and popular-movie pages, maps genre IDs to names, prepares each document, and bulk-indexes the documents into Elasticsearch. It refreshes the index after ingestion and reports both successful indexing operations and the final document count.
+## Ingestion and index mapping
 
-Indexed documents include fields such as:
+The `ingestion/seed.js` script fetches TMDB genre metadata and popular-movie pages, maps genre IDs to names, prepares documents, bulk-indexes them, refreshes the index, and reports successful operations separately from the final document count. Failed bulk items are logged with document IDs and reasons; any indexing failure results in a non-zero exit status.
 
-- `tmdb_id`, `title`, `original_title`
-- `short_description` and `overview` (both retained for compatibility)
-- `content`, `genres`, `original_language`
-- `year`, `release_date`, `popularity`, `vote_average`
-- `poster_url`, `poster_path`, `backdrop_path`
+Indexed fields include `tmdb_id`, `title`, `original_title`, `short_description`, `overview`, `content`, `genres`, `year`, `release_date`, `original_language`, `popularity`, `vote_average`, `poster_url`, `poster_path`, and `backdrop_path`.
 
-Bulk item failures are reported with document IDs and reasons. If any documents fail to index, the script exits with a non-zero status. The `indexed` summary counts successful indexing operations, while the final `count` reports unique documents in the index. These numbers can differ because TMDB popular pages may contain the same movie more than once and the TMDB ID is used as the Elasticsearch document ID; indexing a repeated ID updates that document instead of creating a duplicate. For example, 1,000 successful operations ending with 977 documents means repeated IDs were updated, not that 23 indexing operations failed.
-
-## Elasticsearch mapping and analysis
-
-The index definition is in `mappings/movies.json`. It is written in Kibana Console format and begins with `PUT /movies`. Normally, `make ingest-reset` creates the index automatically. To inspect or create the index manually, open Kibana Dev Tools at [http://localhost:5601/app/dev_tools#/console](http://localhost:5601/app/dev_tools#/console) and run the mapping request.
-
-### Validate the mapping
-
-In Kibana Dev Tools:
+The mapping is defined in `mappings/movies.json`. To inspect it or test the analyzer, open Kibana Dev Tools at [http://localhost:5601/app/dev_tools#/console](http://localhost:5601/app/dev_tools#/console):
 
 ```http
 GET /movies/_mapping
-```
 
-### Test the analyzer
-
-```http
 POST /movies/_analyze
 {
   "analyzer": "english_analyzer",
@@ -214,26 +191,19 @@ POST /movies/_analyze
 }
 ```
 
-The analyzer applies possessive stemming, lowercasing, ASCII folding, English stopword removal, and English stemming. This helps searches match related forms such as `cars` and `car`, and handles many accented characters such as `café` and `cafe`.
+Mapping changes require recreating and repopulating the index with the guarded `make ingest-reset CONFIRM_RESET=1` command.
 
-Mapping highlights:
+## Search API contract
 
-- `title.keyword` stores an exact-value subfield of a title.
-- `title.suggest` is a completion field used by autocomplete.
-- `genres` is a keyword field for filters and genre facets.
-- The index uses one shard and zero replicas for the local single-node POC.
+The Express API listens on port 3000. Its environment variables are `PORT`, `ES_URL`, and `INDEX`, with defaults `3000`, `http://localhost:9200`, and `movies`.
 
-## Backend API
+### Health
 
-The Express server in `backend/` exposes a small HTTP interface on port 3000. Configure `PORT`, `ES_URL`, and `INDEX` through `backend/.env`; defaults are `3000`, `http://localhost:9200`, and `movies`.
-
-### Health check
+`GET /health` returns HTTP 200 when Elasticsearch is reachable and HTTP 503 when it is not.
 
 ```bash
 curl -i http://localhost:3000/health
 ```
-
-Returns HTTP 200 when Elasticsearch is reachable and HTTP 503 when it is not.
 
 ### Search
 
@@ -241,163 +211,76 @@ Returns HTTP 200 when Elasticsearch is reachable and HTTP 503 when it is not.
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `q` | string | empty | Text query. An empty query browses all documents sorted by popularity. |
-| `genres` | string | empty | Comma-separated exact genre filters, for example `Action,Drama`. |
-| `minRating` | number | none | Minimum `vote_average`, from 0 to 10. |
-| `from` | integer | `0` | Non-negative pagination offset. |
-| `size` | integer | `20` | Page size from 1 to 50. |
-
-Example requests:
+| `q` | string | empty | Text query; empty query browses all indexed documents |
+| `genres` | string | empty | Comma-separated exact genre filters, e.g. `Action,Drama` |
+| `minRating` | number | none | Minimum `vote_average`, from 0 to 10 |
+| `from` | integer | `0` | Non-negative pagination offset |
+| `size` | integer | `20` | Page size from 1 to 50 |
 
 ```bash
-# Search
-curl -s "http://localhost:3000/search?q=space%20adventure&size=5" | jq
+curl -sG --data-urlencode 'q="Spider-Man" -Homecoming' \
+  "http://localhost:3000/search" | jq '{total, titles: [.hits[].title]}'
 
-# Search with filters
-curl -s "http://localhost:3000/search?q=war&genres=Action,Drama&minRating=7" | jq
-
-# Browse by popularity
-curl -s "http://localhost:3000/search?size=5" | jq '.hits[] | {title, popularity, year}'
+curl -sG --data-urlencode 'q=space adventure' \
+  --data-urlencode 'genres=Science Fiction' \
+  --data-urlencode 'minRating=7' \
+  "http://localhost:3000/search" | jq
 ```
 
-A successful response has this general shape:
+The response uses `hits`, `facets`, and `took_ms`; the Rails POC keeps its frontend-compatible `items` envelope. Compare behavior and document IDs rather than forcing both frontends to consume the same response shape or comparing exact Elasticsearch `_score` values.
 
-```json
-{
-  "total": 100,
-  "took_ms": 12,
-  "hits": [
-    {
-      "id": "634649",
-      "score": 11.67,
-      "title": "...",
-      "year": 2021,
-      "highlight": {
-        "title": ["<mark>Avengers</mark>"]
-      }
-    }
-  ],
-  "facets": {
-    "genres": [{ "value": "Drama", "count": 33 }],
-    "years": [{ "value": 2025, "count": 67 }]
-  }
-}
-```
+### Query semantics
 
-The example is illustrative; actual counts, scores, and results depend on the indexed dataset. The `hits` array contains document fields plus `id`, `score`, and `highlight`.
-
-### Search behavior and relevance
-
-- Plain-term queries use `simple_query_string` with `OR` semantics for broad recall.
-- When the query includes a negative term such as `-Homecoming`, the API switches the parser's default operator to `AND`. This keeps the positive search clause mandatory while excluding documents matching the negative term. For example, `"Spider-Man" -Homecoming` should return Spider-Man matches without Homecoming results, rather than broadening to almost the entire index.
-- Explicit syntax supports phrases, required terms (`+`), excluded terms (`-`), wildcards, and fuzzy terms.
-- A separate phrase match adds a ranking boost; it is not a mandatory condition by itself.
-- Genre and rating constraints are filters and do not directly add to the relevance score.
-- Results are sorted by score first for text queries, with popularity and `tmdb_id` tie-breakers. Browse mode sorts by popularity and then `tmdb_id`.
-- Exact `_score` values are Elasticsearch-specific; use matching document IDs and expected ordering when comparing this POC with another search implementation.
-
-### Facets and highlighting
-
-Search responses include:
-
-- `facets.genres`: genre names and document counts.
-- `facets.years`: five-year histogram buckets.
-- `highlight`: matching title and overview/description fragments wrapped in `<mark>` tags.
+- Ordinary terms use `simple_query_string` with default operator `OR` for broad recall.
+- A query containing an exclusion (for example `"Spider-Man" -Homecoming`) switches the default operator to `AND`, keeping the positive clause mandatory while excluding matches for the negative term.
+- Supported syntax includes quoted phrases, required terms (`+`), exclusions (`-`), wildcard prefixes, fuzzy terms and grouping supported by `simple_query_string`.
+- A separate phrase clause boosts ranking; it is not independently mandatory.
+- Filters do not directly contribute to relevance scoring.
+- Text queries sort by score, then popularity and TMDB ID. Browse mode sorts by popularity and TMDB ID.
+- Responses include genre facets, five-year histogram facets, and `<mark>` highlights.
 
 ### Suggestions
 
-`GET /suggest?q=spi&size=5`
-
-Autocomplete uses the `title.suggest` completion field with duplicate suggestions removed and fuzzy completion enabled. The `size` parameter must be between 1 and 10. A blank query returns an empty `suggestions` array.
+`GET /suggest?q=spi&size=5` uses the `title.suggest` completion field with fuzzy completion and duplicate skipping. The size must be between 1 and 10.
 
 ```bash
 curl -s "http://localhost:3000/suggest?q=spi" | jq
 ```
 
-### Get a movie by ID
+### Movie lookup and validation
 
-`GET /movies/:id` returns a movie document or HTTP 404 when there is no matching document. The ID is the TMDB ID used when the movie is indexed.
+`GET /movies/:id` fetches a movie by TMDB ID (404 when it is not indexed). Invalid scalar parameters, pagination values, ratings or suggestion sizes return HTTP 400. Unexpected failures return a generic HTTP 500.
 
 ```bash
 curl -i http://localhost:3000/movies/634649
-```
-
-### Validation errors
-
-Invalid parameters return HTTP 400. For example:
-
-```bash
 curl -i "http://localhost:3000/search?from=-1"
 curl -i "http://localhost:3000/search?size=51"
-curl -i "http://localhost:3000/search?minRating=11"
-curl -i "http://localhost:3000/suggest?q=spi&size=11"
 ```
 
-Unexpected backend errors return a generic HTTP 500 response rather than exposing raw Elasticsearch details.
+## Shared fixtures and parity checks
+
+The shared behavior scenarios live in `contracts/search-cases.json` and are intended for both `poc-elastic` and `ror-elastic`. The scenarios cover plain queries, phrases, required and excluded terms, wildcard/fuzzy queries, filters, browsing, suggestions and accent folding.
+
+Run local checks with:
+
+```bash
+make verify
+make api-smoke
+```
+
+`api-smoke` requires the backend to be running; meaningful result checks also require a populated index. Compare matching TMDB document IDs, filter correctness, exclusions and expected relative ordering—not exact `_score` values.
+
+## Troubleshooting
+
+- **TMDB authentication fails:** check `TMDB_API_KEY` in `ingestion/.env`.
+- **Elasticsearch unavailable:** run `make up`, inspect `make logs`, and verify `ES_URL`.
+- **No search results:** confirm ingestion succeeded and the `movies` index exists with `make index-info`.
+- **Mapping changed:** run the guarded reset and reingest data; this deletes the existing configured index.
 
 ## Frontend
 
-The Vue 3 + Vite frontend demonstrates the end-to-end search experience.
+The Vue 3/Vite UI includes debounced autocomplete with keyboard navigation, a search tips modal, highlighted results, genre and rating filters, browse mode, and pagination. Start it with `make frontend` and open http://localhost:5173.
 
-```bash
-make frontend
-```
+## License
 
-Open http://localhost:5173. The UI includes:
-
-- Debounced autocomplete with posters; arrow-key navigation and Enter selection.
-- A search tips modal describing supported query operators.
-- A results grid with poster, title, year, rating, genres, highlights, and score.
-- Genre checkboxes and a minimum-rating slider.
-- Browse mode for an empty query.
-- Pagination.
-
-Key files:
-
-```text
-frontend/
-├── index.html
-├── package.json
-├── vite.config.js
-└── src/
-    ├── main.js
-    ├── style.css
-    ├── api.js
-    ├── App.vue
-    └── components/
-        ├── SearchBar.vue
-        ├── SearchHelpModal.vue
-        ├── FacetSidebar.vue
-        ├── MovieGrid.vue
-        └── MovieCard.vue
-```
-
-## Local verification checklist
-
-Run these steps after a fresh checkout or after changing the mapping:
-
-```bash
-# 1. Configure local env files first (see Quick start)
-make setup
-
-# 2. Recreate the index and load data (destructive)
-make ingest-reset
-
-# 3. Run backend unit tests
-make test
-
-# 4. In separate terminals, start the backend and frontend
-make backend
-make frontend
-```
-
-Then verify:
-
-1. `http://localhost:5173` loads the search UI.
-2. `curl -i http://localhost:3000/health` reports the Elasticsearch connection.
-3. `/search?size=5` returns hits and facets.
-4. `/suggest?q=spi` returns suggestions if matching titles are indexed.
-5. Invalid parameters return HTTP 400.
-6. `/movies/634649` returns the movie when that TMDB ID is present in the indexed pages.
-
-The unit tests do not require a live Elasticsearch cluster. The end-to-end checks do require Elasticsearch to be running and the TMDB ingestion to have succeeded.
+MIT
