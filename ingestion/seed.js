@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@elastic/elasticsearch';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 const TMDB_API_KEY = (process.env.TMDB_API_KEY || '').trim();
 const ES_URL = process.env.ES_URL || 'http://localhost:9200';
 const INDEX = process.env.INDEX || 'movies';
@@ -15,7 +14,6 @@ const PAGES = pagesArg
   ? Number.parseInt(pagesArg.split('=')[1], 10)
   : Number.parseInt(process.env.PAGES || '5', 10);
 const RESET = process.argv.includes('--reset');
-
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const POSTER_BASE = 'https://image.tmdb.org/t/p/w342';
 const MAPPING_FILE = path.resolve(__dirname, '../mappings/movies.json');
@@ -74,14 +72,19 @@ const buildDoc = (m, genreMap) => {
   return {
     tmdb_id: String(m.id),
     title: m.title,
+    original_title: m.original_title || m.title,
     short_description: m.overview || '',
+    overview: m.overview || '',
     content: contentParts.join(' | '),
     genres: genreNames,
     year: m.release_date ? Number.parseInt(m.release_date.slice(0, 4), 10) : null,
     release_date: m.release_date || null,
+    original_language: m.original_language || null,
     popularity: m.popularity ?? null,
     vote_average: m.vote_average ?? null,
-    poster_url: m.poster_path ? `${POSTER_BASE}${m.poster_path}` : null
+    poster_url: m.poster_path ? `${POSTER_BASE}${m.poster_path}` : null,
+    poster_path: m.poster_path || null,
+    backdrop_path: m.backdrop_path || null
   };
 };
 
@@ -90,7 +93,6 @@ const main = async () => {
   await es.ping().catch(() => {
     throw new Error(`Cannot reach Elasticsearch at ${ES_URL}. Is the docker stack up?`);
   });
-
   if (RESET) await resetIndex();
 
   console.log('→ fetching genre map');
@@ -114,7 +116,6 @@ const main = async () => {
       return [{ index: { _index: INDEX, _id: doc.tmdb_id } }, doc];
     });
     const resp = await es.bulk({ refresh: false, operations });
-
     const failed = resp.errors
       ? resp.items.flatMap((item, index) => item.index?.error
           ? [{ id: operations[index * 2]?.index?._id, reason: item.index.error.reason }]
@@ -131,7 +132,6 @@ const main = async () => {
   await es.indices.refresh({ index: INDEX });
   const { count } = await es.count({ index: INDEX });
   console.log(`✓ done. indexed=${totalIndexed} failed=${totalFailed}. index '${INDEX}' has ${count} docs total.`);
-
   if (failures.length) {
     console.error('Failed documents (first 20):', JSON.stringify(failures.slice(0, 20), null, 2));
     process.exitCode = 1;
