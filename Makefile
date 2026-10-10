@@ -9,7 +9,7 @@ INDEX ?= movies
 .PHONY: help setup setup-env setup-backend setup-ingestion setup-frontend \
         up down logs wait-es health elastic kibana \
         install install-backend install-ingestion install-frontend \
-        ingest ingest-reset test test-backend build verify \
+        ingest ingest-reset sync sync-reset test test-backend build verify \
         backend frontend index-info api-smoke smoke
 
 help: ## List available local development commands
@@ -84,6 +84,10 @@ ingest: wait-es ## Ingest or update TMDB movies without deleting the index
 ingest-reset: wait-es ## Recreate the index and ingest movies (requires CONFIRM_RESET=1)
 	@test "$(CONFIRM_RESET)" = "1" || (echo "Destructive: this recreates the configured Elasticsearch index. Run: make ingest-reset CONFIRM_RESET=1 [PAGES=25]" >&2; exit 1)
 	cd ingestion && npm run seed -- --reset $(if $(PAGES),--pages=$(PAGES),)
+
+sync: ingest ## Shared alias for ingest
+
+sync-reset: ingest-reset ## Shared alias for ingest-reset
 
 test: test-backend ## Run all configured backend tests
 
