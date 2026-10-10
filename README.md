@@ -57,6 +57,8 @@ The Vue frontend calls Express over HTTP. The API translates request parameters 
 - A TMDB v3 API key or v4 Read Access Token
 - `curl`; `jq` is optional for formatted terminal output
 
+The local stack supports explicit ports and an Elasticsearch heap size using Make variables. These defaults are for a standalone POC; set different values when running both POCs on the same machine.
+
 Elasticsearch is configured for a local single-node POC with security disabled. Do not expose this stack to a public network or use it as a production deployment.
 
 ## Quick start
@@ -86,7 +88,7 @@ This creates any missing environment files, starts Elasticsearch and Kibana, wai
 | Elasticsearch | http://localhost:9200 |
 | Kibana | http://localhost:5601 |
 | Express API | http://localhost:3000 |
-| Vue/Vite frontend | http://localhost:5173 |
+| Vue/Vite frontend | http://localhost:5173 (override with `FRONTEND_PORT`) |
 
 Check Elasticsearch:
 
@@ -171,7 +173,7 @@ Run `make help` to list targets. The command names intentionally match the Rails
 | `make index-info` | Inspect the configured Elasticsearch index |
 | `make api-smoke` | Check health, browse search and suggestions |
 
-`ES_URL`, `BACKEND_URL`, and `INDEX` can override the defaults for the local helper commands.
+`ES_PORT`, `ES_TRANSPORT_PORT`, `KIBANA_PORT`, `ES_HEAP_SIZE`, `ES_MEM_LIMIT`, `API_PORT`, `FRONTEND_PORT`, `ES_URL`, `BACKEND_URL`, and `INDEX` can override defaults. For example, to run the Node stack alongside the Rails stack, use `ES_PORT=9201 KIBANA_PORT=5602 ES_HEAP_SIZE=1g API_PORT=3010 make up` and start its API with the same `ES_URL` and `API_PORT` values.
 
 ## Ingestion and index mapping
 
@@ -229,6 +231,8 @@ curl -sG --data-urlencode 'q=space adventure' \
 
 The response uses `hits`, `facets`, and `took_ms`; the Rails POC keeps its frontend-compatible `items` envelope. Compare behavior and document IDs rather than forcing both frontends to consume the same response shape or comparing exact Elasticsearch `_score` values.
 
+An Elasticsearch `BadRequest` raised while executing a query is normalized to an empty successful search response (HTTP 200), matching the Rails POC's intended search-as-you-type behavior. Parameter validation errors remain HTTP 400. Whether a given incomplete `simple_query_string` expression raises a transport error depends on Elasticsearch query parsing; the contract suite exercises representative incomplete inputs.
+
 ### Query semantics
 
 - Ordinary terms use `simple_query_string` with default operator `OR` for broad recall.
@@ -257,18 +261,25 @@ curl -i "http://localhost:3000/search?from=-1"
 curl -i "http://localhost:3000/search?size=51"
 ```
 
-## Shared fixtures and parity checks
+## Shared executable contract and parity checks
 
-The shared behavior scenarios live in `contracts/search-cases.json` and are intended for both `poc-elastic` and `ror-elastic`. The scenarios cover plain queries, phrases, required and excluded terms, wildcard/fuzzy queries, filters, browsing, suggestions and accent folding.
+`contracts/search-cases.json` is consumed by `scripts/search-contract.mjs`, which seeds a deterministic fixture corpus in an isolated `movies-contract-test` index and calls both the Node and Rails APIs. It compares ordered IDs, totals, genre/year facets, filter behavior, suggestion results, browse ordering, and malformed-query handling. It does not compare exact `_score` values.
 
-Run local checks with:
+Run both APIs against the same Elasticsearch instance/index before executing the runner. The runner only deletes/recreates an index whose name ends in `-contract-test`; it refuses to seed the regular `movies` index.
 
 ```bash
-make verify
-make api-smoke
+# Terminal 1: start one Elasticsearch stack, then seed its contract index
+# Terminal 2:
+make backend API_PORT=3000 ES_URL=http://localhost:9200 INDEX=movies-contract-test
+# Terminal 3 (from the Rails repository):
+make backend API_PORT=3100 ELASTICSEARCH_URL=http://localhost:9200 ELASTICSEARCH_INDEX=movies-contract-test
+# Terminal 4:
+make contract-smoke CONTRACT_SETUP_INDEX=1 \\
+  ES_URL=http://localhost:9200 CONTRACT_INDEX=movies-contract-test \\
+  NODE_API_URL=http://localhost:3000 RAILS_API_URL=http://localhost:3100
 ```
 
-`api-smoke` requires the backend to be running; meaningful result checks also require a populated index. Compare matching TMDB document IDs, filter correctness, exclusions and expected relative ordering—not exact `_score` values.
+The script is also used by CI with a dedicated Elasticsearch service and a clean fixture index. To run only the unit checks and frontend build, use `make verify`; `make api-smoke` continues to check a single backend.
 
 ## Troubleshooting
 
