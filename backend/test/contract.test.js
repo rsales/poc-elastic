@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { queryScalar, parseInteger, parseRating } from '../validation.js';
+import { getDefaultOperator } from '../querySemantics.js';
 
 test('pagination defaults are explicit', () => {
   assert.equal(parseInteger(undefined, { name: 'from', defaultValue: 0, min: 0 }), 0);
@@ -29,4 +30,15 @@ test('query parameters must be scalar values', () => {
   assert.equal(queryScalar(undefined, 'q'), undefined);
   assert.throws(() => queryScalar(['a', 'b'], 'q'), { status: 400 });
   assert.throws(() => queryScalar({ nested: 'value' }, 'q'), { status: 400 });
+});
+
+test('ordinary queries retain OR semantics', () => {
+  assert.equal(getDefaultOperator('Spider-Man'), 'OR');
+  assert.equal(getDefaultOperator('"Spider-Man"'), 'OR');
+});
+
+test('a query with an exclusion uses AND so the positive clause remains mandatory', () => {
+  assert.equal(getDefaultOperator('"Spider-Man" -Homecoming'), 'AND');
+  assert.equal(getDefaultOperator('Spider-Man -Homecoming'), 'AND');
+  assert.equal(getDefaultOperator('"Spider-Man" -Homecoming Action'), 'AND');
 });
