@@ -90,11 +90,11 @@ install-frontend: ## Install Vue/Vite frontend dependencies
 	cd frontend && npm install
 
 ingest: wait-es ## Ingest or update TMDB movies without deleting the index
-	cd ingestion && npm run seed -- $(if $(PAGES),--pages=$(PAGES),)
+	cd ingestion && ES_URL=$(ES_URL) INDEX=$(INDEX) npm run seed -- $(if $(PAGES),--pages=$(PAGES),)
 
 ingest-reset: wait-es ## Recreate the index and ingest movies (requires CONFIRM_RESET=1)
 	@test "$(CONFIRM_RESET)" = "1" || (echo "Destructive: this recreates the configured Elasticsearch index. Run: make ingest-reset CONFIRM_RESET=1 [PAGES=25]" >&2; exit 1)
-	cd ingestion && npm run seed -- --reset $(if $(PAGES),--pages=$(PAGES),)
+	cd ingestion && ES_URL=$(ES_URL) INDEX=$(INDEX) npm run seed -- --reset $(if $(PAGES),--pages=$(PAGES),)
 
 sync: ingest ## Shared alias for ingest
 
