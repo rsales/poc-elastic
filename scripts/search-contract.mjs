@@ -138,9 +138,10 @@ function assertExpectedCase(testCase, normalized) {
   if (testCase.id === 'plain-query-or') {
     assert.ok(ids.has('1001') && ids.has('1002'), 'plain-query-or: OR must return both space-only and adventure-only documents');
   }
-  if (testCase.id === 'required-term') {
+  if (testCase.id === 'and-operator') {
     for (const item of normalized.items) {
-      assert.match(searchableText(item), /space/, `required-term: result ${item.id} does not contain required term "space"`);
+      assert.match(searchableText(item), /space/, `and-operator: result ${item.id} does not contain "space"`);
+      assert.match(searchableText(item), /adventure/, `and-operator: result ${item.id} does not contain "adventure"`);
     }
   }
   if (testCase.id === 'excluded-term') {
