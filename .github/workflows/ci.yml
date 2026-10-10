@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+      - name: Run backend unit tests
+        run: npm test --prefix backend
+      - name: Check ingestion script syntax
+        run: node --check ingestion/seed.js
+      - name: Check shared contract runner syntax
+        run: node --check scripts/search-contract.mjs
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Build Vue frontend
+        run: npm run build --prefix frontend
+
+  cross-poc-contract:
+    runs-on: ubuntu-latest
+    services:
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          xpack.security.http.ssl.enabled: "false"
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health >/dev/null || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Clone Rails reference POC
+        run: git clone --depth 1 https://github.com/rsales/ror-elastic.git /tmp/ror-elastic
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.5"
+          working-directory: /tmp/ror-elastic/backend
+          bundler-cache: true
+      - name: Install Node API dependencies
+        run: npm ci --prefix backend
+      - name: Install Rails database schema
+        working-directory: /tmp/ror-elastic
+        env:
+          RAILS_ENV: development
+        run: cd backend && bin/rails db:prepare
+      - name: Start Node and Rails APIs on separate ports
+        shell: bash
+        run: |
+          cd backend
+          nohup env PORT=3000 ES_URL=http://localhost:9200 INDEX=movies-contract-test npm start > /tmp/node-api.log 2>&1 &
+          cd /tmp/ror-elastic/backend
+          nohup env RAILS_ENV=development ELASTICSEARCH_URL=http://localhost:9200 ELASTICSEARCH_INDEX=movies-contract-test bundle exec rails server -p 3100 > /tmp/rails-api.log 2>&1 &
+      - name: Wait for APIs
+        shell: bash
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://localhost:3000/health >/dev/null &&
+               curl --silent --fail http://localhost:3100/api/health | grep -q '"status":"ok"'; then
+              echo "Both APIs are ready."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Node API log:"; cat /tmp/node-api.log || true
+          echo "Rails API log:"; cat /tmp/rails-api.log || true
+          exit 1
+      - name: Execute shared behavior fixtures against both APIs
+        env:
+          CONTRACT_SETUP_INDEX: "1"
+          CONTRACT_ES_URL: http://localhost:9200
+          CONTRACT_INDEX: movies-contract-test
+          NODE_API_URL: http://localhost:3000
+          RAILS_API_URL: http://localhost:3100
+        run: node scripts/search-contract.mjs
