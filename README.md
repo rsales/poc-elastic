@@ -288,9 +288,10 @@ The example is illustrative; actual counts, scores, and results depend on the in
 
 ### Search behavior and relevance
 
-- Plain terms use `simple_query_string` with `OR` semantics for broad recall.
-- Explicit syntax can express phrases, required terms (`+`), excluded terms (`-`), wildcards, and fuzzy terms.
-- A phrase match adds a ranking boost; it is not a mandatory condition.
+- Plain-term queries use `simple_query_string` with `OR` semantics for broad recall.
+- When the query includes a negative term such as `-Homecoming`, the API switches the parser's default operator to `AND`. This keeps the positive search clause mandatory while excluding documents matching the negative term. For example, `"Spider-Man" -Homecoming` should return Spider-Man matches without Homecoming results, rather than broadening to almost the entire index.
+- Explicit syntax supports phrases, required terms (`+`), excluded terms (`-`), wildcards, and fuzzy terms.
+- A separate phrase match adds a ranking boost; it is not a mandatory condition by itself.
 - Genre and rating constraints are filters and do not directly add to the relevance score.
 - Results are sorted by score first for text queries, with popularity and `tmdb_id` tie-breakers. Browse mode sorts by popularity and then `tmdb_id`.
 - Exact `_score` values are Elasticsearch-specific; use matching document IDs and expected ordering when comparing this POC with another search implementation.
