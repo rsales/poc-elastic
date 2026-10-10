@@ -173,7 +173,7 @@ Run `make help` to list targets. The command names intentionally match the Rails
 | `make index-info` | Inspect the configured Elasticsearch index |
 | `make api-smoke` | Check health, browse search and suggestions |
 
-`ES_PORT`, `ES_TRANSPORT_PORT`, `KIBANA_PORT`, `ES_HEAP_SIZE`, `ES_MEM_LIMIT`, `API_PORT`, `FRONTEND_PORT`, `ES_URL`, `BACKEND_URL`, and `INDEX` can override defaults. For example, to run the Node stack alongside the Rails stack, use `ES_PORT=9201 KIBANA_PORT=5602 ES_HEAP_SIZE=1g API_PORT=3010 make up` and start its API with the same `ES_URL` and `API_PORT` values.
+`ES_PORT`, `ES_TRANSPORT_PORT`, `KIBANA_PORT`, `ES_HEAP_SIZE`, `ES_MEM_LIMIT`, `API_PORT`, `FRONTEND_PORT`, `ES_URL`, `BACKEND_URL`, and `INDEX` can override defaults. For example, to run the Node stack alongside the Rails stack, use `ES_PORT=9201 ES_TRANSPORT_PORT=9301 KIBANA_PORT=5602 ES_HEAP_SIZE=1g ES_MEM_LIMIT=2g make up`, then start its API separately with `make backend API_PORT=3010 ES_PORT=9201`.
 
 ## Ingestion and index mapping
 
