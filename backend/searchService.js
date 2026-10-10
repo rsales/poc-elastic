@@ -1,4 +1,5 @@
 import { Client } from '@elastic/elasticsearch';
+import { getDefaultOperator } from './querySemantics.js';
 
 const ES_URL = process.env.ES_URL || 'http://localhost:9200';
 const INDEX = process.env.INDEX || 'movies';
@@ -6,14 +7,14 @@ const INDEX = process.env.INDEX || 'movies';
 export const es = new Client({ node: ES_URL });
 
 export const search = async ({ q = '', genres = [], minRating = null, from = 0, size = 20 }) => {
-  // Plain terms default to OR for broad recall. The simple_query_string parser keeps
-  // explicit operators such as +required, -excluded, quotes, wildcards and fuzzy terms.
+  // Preserve OR semantics for broad recall on ordinary terms. When the user
+  // explicitly excludes a term, use AND so the positive clause stays mandatory.
   const must = q
     ? [{
         simple_query_string: {
           query: q,
           fields: ['title^3', 'short_description^2', 'overview^2', 'content^1'],
-          default_operator: 'OR',
+          default_operator: getDefaultOperator(q),
           lenient: true
         }
       }]
