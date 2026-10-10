@@ -2,8 +2,12 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { search, suggest, getById, es } from './searchService.js';
+import { queryScalar, parseInteger, parseRating } from './validation.js';
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  throw new Error('PORT must be an integer between 1 and 65535');
+}
 
 const app = express();
 app.use(cors());
@@ -16,20 +20,28 @@ app.use((req, _res, next) => {
 
 app.get('/health', async (_req, res) => {
   const cluster = await es.cluster.health().catch(() => null);
-  res.json({ status: 'ok', es: cluster?.status || 'unreachable' });
+  const reachable = Boolean(cluster);
+  res.status(reachable ? 200 : 503).json({
+    status: reachable ? 'ok' : 'degraded',
+    es: cluster?.status || 'unreachable'
+  });
 });
 
 app.get('/search', async (req, res, next) => {
   try {
-    const { q = '', genres = '', minRating, from = '0', size = '20' } = req.query;
-    const result = await search({
-      q: String(q).trim(),
-      genres: genres ? String(genres).split(',').map(s => s.trim()).filter(Boolean) : [],
-      minRating: minRating != null ? Number(minRating) : null,
-      from: Math.max(0, parseInt(from, 10) || 0),
-      size: Math.min(50, Math.max(1, parseInt(size, 10) || 20))
-    });
-    console.log(`GET /search q="${q}" genres="${genres}" min=${minRating ?? '-'} hits=${result.total} took=${Date.now() - req._start}ms`);
+    const q = queryScalar(req.query.q, 'q') ?? '';
+    const genresValue = queryScalar(req.query.genres, 'genres') ?? '';
+    const minRatingValue = queryScalar(req.query.minRating, 'minRating');
+    const fromValue = queryScalar(req.query.from, 'from');
+    const sizeValue = queryScalar(req.query.size, 'size');
+
+    const from = parseInteger(fromValue, { name: 'from', defaultValue: 0, min: 0 });
+    const size = parseInteger(sizeValue, { name: 'size', defaultValue: 20, min: 1, max: 50 });
+    const minRating = parseRating(minRatingValue);
+    const genres = genresValue.split(',').map(s => s.trim()).filter(Boolean);
+
+    const result = await search({ q: q.trim(), genres, minRating, from, size });
+    console.log(`GET /search q="${q}" genres="${genresValue}" min=${minRating ?? '-'} hits=${result.total} took=${Date.now() - req._start}ms`);
     res.json(result);
   } catch (e) {
     next(e);
@@ -38,11 +50,10 @@ app.get('/search', async (req, res, next) => {
 
 app.get('/suggest', async (req, res, next) => {
   try {
-    const { q = '', size = '5' } = req.query;
-    const result = await suggest({
-      q: String(q).trim(),
-      size: Math.min(10, Math.max(1, parseInt(size, 10) || 5))
-    });
+    const q = (queryScalar(req.query.q, 'q') ?? '').trim();
+    const sizeValue = queryScalar(req.query.size, 'size');
+    const size = parseInteger(sizeValue, { name: 'size', defaultValue: 5, min: 1, max: 10 });
+    const result = await suggest({ q, size });
     console.log(`GET /suggest q="${q}" results=${result.suggestions.length} took=${Date.now() - req._start}ms`);
     res.json(result);
   } catch (e) {
@@ -61,14 +72,17 @@ app.get('/movies/:id', async (req, res, next) => {
 });
 
 app.use((err, _req, res, _next) => {
-  console.error('ERROR:', err.message);
-  res.status(500).json({ error: err.message });
+  const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status >= 500) console.error('ERROR:', err.message);
+  res.status(status).json({
+    error: status === 500 ? 'internal server error' : err.message
+  });
 });
 
 app.listen(PORT, () => {
   console.log(`backend listening on http://localhost:${PORT}`);
-  console.log(`  GET /health`);
-  console.log(`  GET /search?q=...&genres=Action,Drama&minRating=7&from=0&size=20`);
-  console.log(`  GET /suggest?q=spi&size=5`);
-  console.log(`  GET /movies/:id`);
+  console.log('  GET /health');
+  console.log('  GET /search?q=...&genres=Action,Drama&minRating=7&from=0&size=20');
+  console.log('  GET /suggest?q=spi&size=5');
+  console.log('  GET /movies/:id');
 });
