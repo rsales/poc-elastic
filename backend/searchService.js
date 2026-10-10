@@ -5,56 +5,50 @@ const INDEX = process.env.INDEX || 'movies';
 
 export const es = new Client({ node: ES_URL });
 
-export const search = async ({ q, genres, minRating, from, size }) => {
-  // Google-style query syntax: "phrase" for exact, +required, -excluded, term*, term~N
-  // Default OR for broad recall on plain queries (Mario Bros → all Mario films).
-  // Switch to AND when the user uses `-` (exclude), because OR + MUST_NOT degenerates
-  // in Lucene and the exclusion stops working — AND ensures `-Term` actually excludes.
-  const hasExclusion = /(^|\s)-\S/.test(q);
-  const defaultOp = hasExclusion ? 'AND' : 'OR';
-
+export const search = async ({ q = '', genres = [], minRating = null, from = 0, size = 20 }) => {
+  // Keep a single broad-recall contract: OR for ordinary terms, explicit operators
+  // such as +required, -excluded, quotes, wildcards and fuzziness remain user-controlled.
+  // Do not silently switch the semantics of every term just because one exclusion exists.
   const must = q
     ? [{
         simple_query_string: {
           query: q,
           fields: ['title^3', 'short_description^2', 'content^1'],
-          default_operator: defaultOp
+          default_operator: 'OR',
+          lenient: true
         }
       }]
     : [{ match_all: {} }];
 
-  // Boost docs where the query terms appear as an adjacent phrase, even without quotes.
-  // Keeps "best matches" at the top when user types Spider-Man without quoting it.
+  // Phrase match is a ranking boost, not an additional required condition.
   const should = q
     ? [{
         multi_match: {
           query: q,
           type: 'phrase',
           fields: ['title^3', 'short_description^2'],
-          slop: 1
+          slop: 1,
+          boost: 2
         }
       }]
     : [];
 
   const filter = [];
   if (genres.length) filter.push({ terms: { genres } });
-  if (minRating != null && !Number.isNaN(minRating)) {
-    filter.push({ range: { vote_average: { gte: minRating } } });
-  }
-
-  const sort = q ? ['_score'] : [{ popularity: 'desc' }];
+  if (minRating != null) filter.push({ range: { vote_average: { gte: minRating } } });
 
   const resp = await es.search({
     index: INDEX,
     from,
     size,
+    track_total_hits: true,
     query: { bool: { must, should, filter } },
-    sort,
+    sort: q ? [{ _score: 'desc' }, { popularity: 'desc' }, { _id: 'asc' }] : [{ popularity: 'desc' }, { _id: 'asc' }],
     highlight: {
       pre_tags: ['<mark>'],
       post_tags: ['</mark>'],
       fields: {
-        title: {},
+        title: { number_of_fragments: 0 },
         short_description: { fragment_size: 150, number_of_fragments: 2 }
       }
     },
@@ -65,7 +59,7 @@ export const search = async ({ q, genres, minRating, from, size }) => {
   });
 
   return {
-    total: resp.hits.total.value,
+    total: typeof resp.hits.total === 'number' ? resp.hits.total : resp.hits.total.value,
     took_ms: resp.took,
     hits: resp.hits.hits.map(h => ({
       id: h._id,
@@ -80,7 +74,7 @@ export const search = async ({ q, genres, minRating, from, size }) => {
   };
 };
 
-export const suggest = async ({ q, size }) => {
+export const suggest = async ({ q, size = 5 }) => {
   if (!q) return { suggestions: [] };
   const resp = await es.search({
     index: INDEX,
@@ -88,7 +82,7 @@ export const suggest = async ({ q, size }) => {
     suggest: {
       title_suggest: {
         prefix: q,
-        completion: { field: 'title.suggest', size, skip_duplicates: true }
+        completion: { field: 'title.suggest', size, skip_duplicates: true, fuzzy: { fuzziness: 'AUTO' } }
       }
     }
   });
