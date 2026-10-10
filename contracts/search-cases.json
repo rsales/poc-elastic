@@ -24,16 +24,16 @@
       "expect": "Quoted phrase intent is preserved."
     },
     {
-      "id": "required-term",
-      "q": "+space adventure",
+      "id": "and-operator",
+      "q": "space +adventure",
       "expectedAnyIds": [
-        "1001",
         "1003"
       ],
       "expectedNoneIds": [
+        "1001",
         "1002"
       ],
-      "expect": "Space is required; adventure is optional."
+      "expect": "The + operator combines adjacent terms with AND; only documents matching both space and adventure should be returned."
     },
     {
       "id": "excluded-term",
