@@ -337,3 +337,63 @@ cd ingestion
 npm run seed -- --reset
 ```
 
+## Local workflow with Makefile
+
+The root `Makefile` collects the local setup, ingestion, and verification commands. Run commands from the repository root.
+
+### First-time setup
+
+```bash
+make setup
+```
+
+This creates `ingestion/.env` and `backend/.env` from the examples only when they do not exist, then installs dependencies in the backend, ingestion, and frontend. Set `TMDB_API_KEY` in `ingestion/.env` before ingesting. The script supports a TMDB v4 read token or a v3 API key.
+
+### Start Elasticsearch and Kibana
+
+```bash
+make up
+make wait-es
+make status
+```
+
+Elasticsearch is available at `http://localhost:9200` and Kibana at `http://localhost:5601`.
+
+### Ingest movies
+
+For a first load, create the index and ingest 100 movies (5 pages × 20):
+
+```bash
+make reindex CONFIRM_RESET=1
+```
+
+To ingest 500 movies instead:
+
+```bash
+make reindex CONFIRM_RESET=1 PAGES=25
+```
+
+**Warning:** `reindex` passes `--reset`, which deletes and recreates the configured index before ingestion. Use `make ingest PAGES=5` to add/update documents without deleting the index, provided the index already exists. The ingestion script uses stable TMDB IDs, so reruns update the same movie documents.
+
+### Test and run the app
+
+```bash
+make test
+make verify
+```
+
+`make test` runs the backend validation unit tests; `make verify` runs those tests and builds the Vue frontend. Start the backend and frontend in separate terminals:
+
+```bash
+make backend-dev
+make frontend-dev
+```
+
+Open `http://localhost:5173`. With both servers running and data ingested, run the API smoke checks from another terminal:
+
+```bash
+make smoke
+```
+
+Other helpful commands: `make help`, `make logs`, and `make down`. `make down` stops the containers but preserves the named Elasticsearch data volume; it does not delete the index.
+
