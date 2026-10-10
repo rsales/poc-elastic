@@ -237,7 +237,7 @@ An Elasticsearch `BadRequest` raised while executing a query is normalized to an
 
 - Ordinary terms use `simple_query_string` with default operator `OR` for broad recall.
 - A query containing an exclusion (for example `"Spider-Man" -Homecoming`) switches the default operator to `AND`, keeping the positive clause mandatory while excluding matches for the negative term.
-- Supported syntax includes quoted phrases, required terms (`+`), exclusions (`-`), wildcard prefixes, fuzzy terms and grouping supported by `simple_query_string`.
+- Supported syntax includes quoted phrases, the `+` AND operator (for example `space +adventure`), exclusions (`-`), wildcard prefixes, fuzzy terms and grouping supported by `simple_query_string`. A leading unary `+space` is not treated as a required-term modifier by this query parser.
 - A separate phrase clause boosts ranking; it is not independently mandatory.
 - Filters do not directly contribute to relevance scoring.
 - Text queries sort by score, then popularity and TMDB ID. Browse mode sorts by popularity and TMDB ID.
