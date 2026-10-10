@@ -70,12 +70,12 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4.5"
-          working-directory: /tmp/ror-elastic/backend
+          working-directory: peer/ror-elastic/backend
           bundler-cache: true
       - name: Install Node API dependencies
         run: npm ci --prefix backend
       - name: Install Rails database schema
-        working-directory: /tmp/ror-elastic
+        working-directory: peer/ror-elastic
         env:
           RAILS_ENV: development
         run: cd backend && bin/rails db:prepare
@@ -84,7 +84,7 @@ jobs:
         run: |
           cd backend
           nohup env PORT=3000 ES_URL=http://localhost:9200 INDEX=movies-contract-test npm start > /tmp/node-api.log 2>&1 &
-          cd /tmp/ror-elastic/backend
+          cd "$GITHUB_WORKSPACE/peer/ror-elastic/backend"
           nohup env RAILS_ENV=development ELASTICSEARCH_URL=http://localhost:9200 ELASTICSEARCH_INDEX=movies-contract-test bundle exec rails server -p 3100 > /tmp/rails-api.log 2>&1 &
       - name: Wait for APIs
         shell: bash
