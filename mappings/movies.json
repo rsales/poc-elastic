@@ -29,14 +29,19 @@ PUT /movies
           "suggest": { "type": "completion" }
         }
       },
+      "original_title": { "type": "text", "analyzer": "english_analyzer" },
       "short_description": { "type": "text", "analyzer": "english_analyzer" },
+      "overview": { "type": "text", "analyzer": "english_analyzer" },
       "content": { "type": "text", "analyzer": "english_analyzer" },
       "genres": { "type": "keyword" },
       "year": { "type": "integer" },
       "release_date": { "type": "date" },
+      "original_language": { "type": "keyword" },
       "popularity": { "type": "float" },
       "vote_average": { "type": "float" },
-      "poster_url": { "type": "keyword", "index": false }
+      "poster_url": { "type": "keyword", "index": false },
+      "poster_path": { "type": "keyword", "index": false },
+      "backdrop_path": { "type": "keyword", "index": false }
     }
   }
 }
