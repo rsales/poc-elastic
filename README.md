@@ -287,113 +287,110 @@ frontend/
 - `MovieCard` uses `v-html` to render the highlight HTML from the backend. Source is the trusted `<mark>` tag from ES; user-supplied data is escaped before being merged in.
 - `aspect-ratio: 2 / 3` on poster slots avoids layout shift when images load lazily.
 
-## Putting it all together
+## Local development workflow
 
-A full demo run from a clean checkout:
+The root `Makefile` provides shortcuts for starting infrastructure, installing dependencies, ingesting data, and running the application. Run all commands from the repository root.
 
-```bash
-# Terminal 1 — infra
-docker compose up -d
+### 1. Configure environment variables
 
-# Terminal 2 — load real data
-cd ingestion && cp .env.example .env  # fill TMDB_API_KEY
-npm install && npm run seed -- --reset --pages=25  # 500 movies indexed
-
-# Terminal 3 — backend
-cd backend && cp .env.example .env
-npm install && npm start
-
-# Terminal 4 — frontend
-cd frontend && npm install && npm run dev
-```
-
-Then open http://localhost:5173.
-
-## Search contract refinements
-
-The `refine/search-contract` branch tightens the API contract while preserving the response envelope used by the Vue frontend.
-
-- `GET /search`: `from` must be a non-negative integer, `size` must be between 1 and 50, and `minRating` must be between 0 and 10. Invalid input returns HTTP 400 instead of silently reverting to a default.
-- `GET /suggest`: `size` must be between 1 and 10. A blank query still returns an empty suggestions array.
-- Unexpected backend errors return a generic HTTP 500 body; validation errors return HTTP 400 with a safe message.
-- Plain-term queries use OR semantics. Required/excluded terms and phrase, wildcard, and fuzzy syntax are expressed by `simple_query_string`; phrase matching contributes a ranking boost rather than a mandatory condition.
-- Browse and search use stable tie-breaks based on the mapped `tmdb_id` field. Scores remain implementation-specific and should not be compared as exact values across search engines.
-- TMDB ingestion now retains `overview`, `original_title`, `original_language`, `poster_path`, and `backdrop_path` alongside legacy frontend fields (`short_description` and `poster_url`) to ease comparison with the Rails POC.
-- Per-document bulk errors are logged with IDs, and an ingestion run with any failed records exits non-zero.
-
-Run the backend validation tests:
+Create the local environment files from their examples:
 
 ```bash
-cd backend
-npm test
+cp ingestion/.env.example ingestion/.env
+cp backend/.env.example backend/.env
 ```
 
-Shared behavior cases for comparing with `ror-elastic` live in `contracts/search-cases.json`. Compare matching document IDs and expected ordering, not exact Elasticsearch `_score` values.
+Edit `ingestion/.env` and set `TMDB_API_KEY` to your TMDB API Read Access Token (v4) or API key (v3). Keep these local `.env` files private; do not commit secrets.
 
-The tests do not replace integration checks against Elasticsearch and TMDB. Recreate the index after mapping changes:
-
-```bash
-cd ingestion
-npm run seed -- --reset
-```
-
-## Local workflow with Makefile
-
-The root `Makefile` collects the local setup, ingestion, and verification commands. Run commands from the repository root.
-
-### First-time setup
+### 2. Set up the project
 
 ```bash
 make setup
 ```
 
-This creates `ingestion/.env` and `backend/.env` from the examples only when they do not exist, then installs dependencies in the backend, ingestion, and frontend. Set `TMDB_API_KEY` in `ingestion/.env` before ingesting. The script supports a TMDB v4 read token or a v3 API key.
-
-### Start Elasticsearch and Kibana
+This starts Elasticsearch and Kibana with Docker Compose and installs dependencies for the backend, ingestion script, and frontend. Check that Elasticsearch is responding:
 
 ```bash
-make up
-make wait-es
-make status
+make health
+curl -s http://localhost:9200/_cluster/health | jq
 ```
 
-Elasticsearch is available at `http://localhost:9200` and Kibana at `http://localhost:5601`.
+Useful infrastructure commands:
 
-### Ingest movies
+| Command | Description |
+| --- | --- |
+| `make up` | Start Elasticsearch and Kibana |
+| `make down` | Stop containers; preserve the Elasticsearch data volume |
+| `make logs` | Follow container logs |
+| `make elastic` | Open Elasticsearch in the browser |
+| `make kibana` | Open Kibana in the browser |
 
-For a first load, create the index and ingest 100 movies (5 pages × 20):
+### 3. Ingest movie data
+
+For a first run, use:
 
 ```bash
-make reindex CONFIRM_RESET=1
+make ingest-reset
 ```
 
-To ingest 500 movies instead:
+This runs `npm run seed -- --reset`. The script deletes and recreates the configured index using `mappings/movies.json`, then ingests five TMDB pages by default (about 100 movies). **This is destructive for the current `movies` index**: use it only when you are comfortable replacing its contents.
+
+To ingest/update documents without deleting the index:
 
 ```bash
-make reindex CONFIRM_RESET=1 PAGES=25
+make ingest
 ```
 
-**Warning:** `reindex` passes `--reset`, which deletes and recreates the configured index before ingestion. Use `make ingest PAGES=5` to add/update documents without deleting the index, provided the index already exists. The ingestion script uses stable TMDB IDs, so reruns update the same movie documents.
+The `ingest` target requires the index to exist already. Both commands use stable TMDB IDs as Elasticsearch document IDs, so repeated ingestion updates matching movies instead of creating duplicates. The page count can be configured with `PAGES` in `ingestion/.env`.
 
-### Test and run the app
+### 4. Run tests and start the application
+
+Run the backend tests:
 
 ```bash
 make test
-make verify
 ```
 
-`make test` runs the backend validation unit tests; `make verify` runs those tests and builds the Vue frontend. Start the backend and frontend in separate terminals:
+The target runs `npm test` in `backend/` and does not require a live Elasticsearch cluster for the validation unit tests.
+
+Start the API and frontend in separate terminal windows:
 
 ```bash
-make backend-dev
-make frontend-dev
+make backend
 ```
-
-Open `http://localhost:5173`. With both servers running and data ingested, run the API smoke checks from another terminal:
 
 ```bash
-make smoke
+make frontend
 ```
 
-Other helpful commands: `make help`, `make logs`, and `make down`. `make down` stops the containers but preserves the named Elasticsearch data volume; it does not delete the index.
+Open the frontend at **http://localhost:5173**. The backend listens at **http://localhost:3000**, and Vite proxies frontend `/api` requests to it.
 
+### 5. Verify the running API
+
+With the containers, ingestion, and backend running, check the main endpoints:
+
+```bash
+# Backend health and Elasticsearch connectivity
+curl -i http://localhost:3000/health
+
+# Browse movies (should return hits and facets)
+curl -s "http://localhost:3000/search?size=5" | jq
+
+# Search with filters
+curl -s "http://localhost:3000/search?q=space&genres=Science%20Fiction&minRating=7" | jq
+
+# Autocomplete suggestions
+curl -s "http://localhost:3000/suggest?q=spi" | jq
+
+# Look up a movie by its TMDB ID
+curl -i http://localhost:3000/movies/634649
+```
+
+The refined API contract returns HTTP 400 for invalid query parameters, such as a negative `from`, `size=51`, or `minRating=11`. You can verify that behavior with:
+
+```bash
+curl -i "http://localhost:3000/search?size=51"
+curl -i "http://localhost:3000/search?minRating=11"
+```
+
+For a quick reference of available Make targets, inspect the root `Makefile`. The current local targets are `setup`, `up`, `down`, `logs`, `health`, `elastic`, `kibana`, `install`, `test`, `ingest`, `ingest-reset`, `backend`, and `frontend`.
