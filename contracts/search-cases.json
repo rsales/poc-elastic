@@ -2,16 +2,69 @@
   "version": 1,
   "purpose": "Shared behavioral fixtures for poc-elastic and ror-elastic. Assert matching document IDs and behavioral ordering, not exact Elasticsearch _score values.",
   "cases": [
-    { "id": "plain-query-or", "q": "space adventure", "expect": "documents matching either term; both-term matches should normally rank above single-term matches" },
-    { "id": "quoted-phrase", "q": "\"spider man\"", "expect": "phrase intent is preserved by simple_query_string" },
-    { "id": "required-term", "q": "+space adventure", "expect": "space is required; adventure is optional" },
-    { "id": "excluded-term", "q": "spider -horror", "expect": "matching spider documents exclude horror matches" },
-    { "id": "wildcard", "q": "anim*", "expect": "supported simple_query_string wildcard behavior" },
-    { "id": "fuzzy", "q": "avengrs~1", "expect": "near-match behavior where the analyzer/query syntax supports it" },
-    { "id": "genre-filter", "q": "space", "genres": ["Science Fiction"], "expect": "every result satisfies the genre filter" },
-    { "id": "minimum-rating", "q": "", "minRating": 7, "expect": "every result has vote_average >= 7; browse mode sorts popularity descending" },
-    { "id": "browse", "q": "", "expect": "match_all, deterministic popularity-descending ordering" },
-    { "id": "suggestion-prefix", "suggest": "spi", "expect": "title suggestions start with the provided prefix; duplicate texts are removed" },
-    { "id": "accent-folding", "q": "amelie", "expect": "accent-folding behavior is covered when the fixture corpus contains accented titles" }
+    {
+      "id": "plain-query-or",
+      "q": "space adventure",
+      "expect": "documents matching either term; both-term matches should normally rank above single-term matches"
+    },
+    {
+      "id": "quoted-phrase",
+      "q": "\"spider man\"",
+      "expect": "phrase intent is preserved by simple_query_string"
+    },
+    {
+      "id": "required-term",
+      "q": "+space adventure",
+      "expect": "space is required; adventure is optional"
+    },
+    {
+      "id": "excluded-term",
+      "q": "spider -horror",
+      "expect": "matching spider documents exclude horror matches"
+    },
+    {
+      "id": "quoted-phrase-exclusion",
+      "q": "\"Spider-Man\" -Homecoming",
+      "expect": "keep the positive phrase condition and exclude every result whose indexed searchable fields match Homecoming; results must not broaden to documents that only satisfy the exclusion"
+    },
+    {
+      "id": "wildcard",
+      "q": "anim*",
+      "expect": "supported simple_query_string wildcard behavior"
+    },
+    {
+      "id": "fuzzy",
+      "q": "avengrs~1",
+      "expect": "near-match behavior where the analyzer/query syntax supports it"
+    },
+    {
+      "id": "genre-filter",
+      "q": "space",
+      "genres": [
+        "Science Fiction"
+      ],
+      "expect": "every result satisfies the genre filter"
+    },
+    {
+      "id": "minimum-rating",
+      "q": "",
+      "minRating": 7,
+      "expect": "every result has vote_average >= 7; browse mode sorts popularity descending"
+    },
+    {
+      "id": "browse",
+      "q": "",
+      "expect": "match_all, deterministic popularity-descending ordering"
+    },
+    {
+      "id": "suggestion-prefix",
+      "suggest": "spi",
+      "expect": "title suggestions start with the provided prefix; duplicate texts are removed"
+    },
+    {
+      "id": "accent-folding",
+      "q": "amelie",
+      "expect": "accent-folding behavior is covered when the fixture corpus contains accented titles"
+    }
   ]
 }
