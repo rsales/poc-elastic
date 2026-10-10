@@ -164,6 +164,7 @@ Run `make help` to list targets. The command names intentionally match the Rails
 | `make install` | Install all Node.js dependencies |
 | `make ingest PAGES=25` | Ingest/update TMDB movies without resetting the index |
 | `make ingest-reset CONFIRM_RESET=1 PAGES=25` | Recreate the index and ingest data |
+| `make sync PAGES=25` / `make sync-reset CONFIRM_RESET=1 PAGES=25` | Rails-compatible aliases for ingest commands |
 | `make test` | Run backend tests |
 | `make build` / `make verify` | Build frontend / run tests and build |
 | `make backend` / `make frontend` | Start Express / Vite |
