@@ -42,3 +42,21 @@ test('a query with an exclusion uses AND so the positive clause remains mandator
   assert.equal(getDefaultOperator('Spider-Man -Homecoming'), 'AND');
   assert.equal(getDefaultOperator('"Spider-Man" -Homecoming Action'), 'AND');
 });
+
+import { emptySearchResponse, isElasticsearchBadRequest } from '../searchErrors.js';
+
+test('Elasticsearch query BadRequest is recognized for search normalization', () => {
+  assert.equal(isElasticsearchBadRequest({ meta: { statusCode: 400 } }), true);
+  assert.equal(isElasticsearchBadRequest({ meta: { statusCode: 500 } }), false);
+  assert.equal(isElasticsearchBadRequest({ status: 400 }), false);
+  assert.equal(isElasticsearchBadRequest(new Error('query failed')), false);
+});
+
+test('normalized malformed-query response retains the search response envelope', () => {
+  assert.deepEqual(emptySearchResponse(), {
+    total: 0,
+    took_ms: 0,
+    hits: [],
+    facets: { genres: [], years: [] }
+  });
+});
