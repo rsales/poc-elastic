@@ -6,14 +6,13 @@ const INDEX = process.env.INDEX || 'movies';
 export const es = new Client({ node: ES_URL });
 
 export const search = async ({ q = '', genres = [], minRating = null, from = 0, size = 20 }) => {
-  // Keep a single broad-recall contract: OR for ordinary terms, explicit operators
-  // such as +required, -excluded, quotes, wildcards and fuzziness remain user-controlled.
-  // Do not silently switch the semantics of every term just because one exclusion exists.
+  // Plain terms default to OR for broad recall. The simple_query_string parser keeps
+  // explicit operators such as +required, -excluded, quotes, wildcards and fuzzy terms.
   const must = q
     ? [{
         simple_query_string: {
           query: q,
-          fields: ['title^3', 'short_description^2', 'content^1'],
+          fields: ['title^3', 'short_description^2', 'overview^2', 'content^1'],
           default_operator: 'OR',
           lenient: true
         }
@@ -26,7 +25,7 @@ export const search = async ({ q = '', genres = [], minRating = null, from = 0, 
         multi_match: {
           query: q,
           type: 'phrase',
-          fields: ['title^3', 'short_description^2'],
+          fields: ['title^3', 'short_description^2', 'overview^2'],
           slop: 1,
           boost: 2
         }
@@ -37,19 +36,25 @@ export const search = async ({ q = '', genres = [], minRating = null, from = 0, 
   if (genres.length) filter.push({ terms: { genres } });
   if (minRating != null) filter.push({ range: { vote_average: { gte: minRating } } });
 
+  // tmdb_id is a mapped keyword and a stable tie-breaker for repeatable pagination.
+  const sort = q
+    ? [{ _score: 'desc' }, { popularity: 'desc' }, { tmdb_id: 'asc' }]
+    : [{ popularity: 'desc' }, { tmdb_id: 'asc' }];
+
   const resp = await es.search({
     index: INDEX,
     from,
     size,
     track_total_hits: true,
     query: { bool: { must, should, filter } },
-    sort: q ? [{ _score: 'desc' }, { popularity: 'desc' }, { _id: 'asc' }] : [{ popularity: 'desc' }, { _id: 'asc' }],
+    sort,
     highlight: {
       pre_tags: ['<mark>'],
       post_tags: ['</mark>'],
       fields: {
         title: { number_of_fragments: 0 },
-        short_description: { fragment_size: 150, number_of_fragments: 2 }
+        short_description: { fragment_size: 150, number_of_fragments: 2 },
+        overview: { fragment_size: 150, number_of_fragments: 2 }
       }
     },
     aggs: {
