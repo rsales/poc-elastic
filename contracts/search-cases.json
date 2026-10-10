@@ -1,41 +1,84 @@
 {
-  "version": 1,
-  "purpose": "Shared behavioral fixtures for poc-elastic and ror-elastic. Assert matching document IDs and behavioral ordering, not exact Elasticsearch _score values.",
+  "version": 2,
+  "purpose": "Executable shared behavior contract for poc-elastic and ror-elastic. The contract runner seeds the isolated movies-contract-test index from contracts/fixtures and compares expected IDs, filters, facets, suggestions and ordering—not exact Elasticsearch _score values.",
   "cases": [
     {
       "id": "plain-query-or",
       "q": "space adventure",
-      "expect": "documents matching either term; both-term matches should normally rank above single-term matches"
+      "expectedAnyIds": [
+        "1001",
+        "1002",
+        "1003"
+      ],
+      "expect": "OR semantics return documents matching either term; the fixture includes space-only, adventure-only, and both-term documents."
     },
     {
       "id": "quoted-phrase",
       "q": "\"spider man\"",
-      "expect": "phrase intent is preserved by simple_query_string"
+      "expectedAnyIds": [
+        "557",
+        "559",
+        "634649",
+        "315635"
+      ],
+      "expect": "Quoted phrase intent is preserved."
     },
     {
       "id": "required-term",
       "q": "+space adventure",
-      "expect": "space is required; adventure is optional"
+      "expectedAnyIds": [
+        "1001",
+        "1003"
+      ],
+      "expectedNoneIds": [
+        "1002"
+      ],
+      "expect": "Space is required; adventure is optional."
     },
     {
       "id": "excluded-term",
       "q": "spider -horror",
-      "expect": "matching spider documents exclude horror matches"
+      "expectedAnyIds": [
+        "557",
+        "559",
+        "634649",
+        "315635",
+        "907001"
+      ],
+      "expectedNoneIds": [
+        "1005"
+      ],
+      "expect": "Spider matches exclude documents matching horror."
     },
     {
       "id": "quoted-phrase-exclusion",
       "q": "\"Spider-Man\" -Homecoming",
-      "expect": "keep the positive phrase condition and exclude every result whose indexed searchable fields match Homecoming; results must not broaden to documents that only satisfy the exclusion"
+      "expectedAnyIds": [
+        "557",
+        "559",
+        "634649"
+      ],
+      "expectedNoneIds": [
+        "315635",
+        "907001"
+      ],
+      "expect": "Keep the positive Spider-Man phrase mandatory and exclude results matching Homecoming in indexed searchable fields."
     },
     {
       "id": "wildcard",
       "q": "anim*",
-      "expect": "supported simple_query_string wildcard behavior"
+      "expectedAnyIds": [
+        "1006"
+      ],
+      "expect": "Supported simple_query_string wildcard behavior."
     },
     {
       "id": "fuzzy",
-      "q": "avengrs~1",
-      "expect": "near-match behavior where the analyzer/query syntax supports it"
+      "q": "avengrs~2",
+      "expectedAnyIds": [
+        "24428"
+      ],
+      "expect": "Near-match behavior where the analyzer and query syntax support it."
     },
     {
       "id": "genre-filter",
@@ -43,28 +86,61 @@
       "genres": [
         "Science Fiction"
       ],
-      "expect": "every result satisfies the genre filter"
+      "expectedAnyIds": [
+        "1003"
+      ],
+      "expectedNoneIds": [
+        "1001"
+      ],
+      "expect": "Every result satisfies the exact Science Fiction genre filter."
     },
     {
       "id": "minimum-rating",
       "q": "",
       "minRating": 7,
-      "expect": "every result has vote_average >= 7; browse mode sorts popularity descending"
+      "expectedNoneIds": [
+        "1001"
+      ],
+      "minimumRating": 7,
+      "expect": "Every result has vote_average >= 7; browse mode orders by popularity."
     },
     {
       "id": "browse",
       "q": "",
-      "expect": "match_all, deterministic popularity-descending ordering"
+      "expect": "Match all documents with deterministic popularity-descending order and TMDB ID tie-break."
     },
     {
       "id": "suggestion-prefix",
       "suggest": "spi",
-      "expect": "title suggestions start with the provided prefix; duplicate texts are removed"
+      "expectedSuggestionAnyTexts": [
+        "Spider-Man"
+      ],
+      "expect": "Completion suggestions include Spider-Man and deduplicate suggestion text."
     },
     {
       "id": "accent-folding",
       "q": "amelie",
-      "expect": "accent-folding behavior is covered when the fixture corpus contains accented titles"
+      "expectedAnyIds": [
+        "194"
+      ],
+      "expect": "Accent folding matches Amélie."
+    }
+  ],
+  "malformedQueries": [
+    {
+      "id": "unclosed-quote",
+      "q": "\"Spider-Man",
+      "expectedStatus": 200
+    },
+    {
+      "id": "dangling-exclusion",
+      "q": "\"Spider-Man\" -",
+      "expectedStatus": 200
+    },
+    {
+      "id": "incomplete-field-group",
+      "q": "title:(Spider",
+      "expectedStatus": 200
     }
   ]
 }
