@@ -309,4 +309,31 @@ cd frontend && npm install && npm run dev
 
 Then open http://localhost:5173.
 
+## Search contract refinements
+
+The `refine/search-contract` branch tightens the API contract while preserving the response envelope used by the Vue frontend.
+
+- `GET /search`: `from` must be a non-negative integer, `size` must be between 1 and 50, and `minRating` must be between 0 and 10. Invalid input returns HTTP 400 instead of silently reverting to a default.
+- `GET /suggest`: `size` must be between 1 and 10. A blank query still returns an empty suggestions array.
+- Unexpected backend errors return a generic HTTP 500 body; validation errors return HTTP 400 with a safe message.
+- Plain-term queries use OR semantics. Required/excluded terms and phrase, wildcard, and fuzzy syntax are expressed by `simple_query_string`; phrase matching contributes a ranking boost rather than a mandatory condition.
+- Browse and search use stable tie-breaks based on the mapped `tmdb_id` field. Scores remain implementation-specific and should not be compared as exact values across search engines.
+- TMDB ingestion now retains `overview`, `original_title`, `original_language`, `poster_path`, and `backdrop_path` alongside legacy frontend fields (`short_description` and `poster_url`) to ease comparison with the Rails POC.
+- Per-document bulk errors are logged with IDs, and an ingestion run with any failed records exits non-zero.
+
+Run the backend validation tests:
+
+```bash
+cd backend
+npm test
+```
+
+Shared behavior cases for comparing with `ror-elastic` live in `contracts/search-cases.json`. Compare matching document IDs and expected ordering, not exact Elasticsearch `_score` values.
+
+The tests do not replace integration checks against Elasticsearch and TMDB. Recreate the index after mapping changes:
+
+```bash
+cd ingestion
+npm run seed -- --reset
+```
 
