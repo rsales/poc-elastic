@@ -1,102 +1,87 @@
-# CLAUDE.md — Elasticsearch POC
+# CLAUDE.md — poc-elastic
 
-Context guide for Claude Code sessions working on this project.
+## What this is
+Full-stack movie-search POC: **Elasticsearch 8** + **Node.js/Express API** + **Vue 3/Vite frontend**. Movie data comes from TMDB.
+This is the **Node implementation** of a search experiment compared against the Rails one in [`ror-elastic`](https://github.com/rsales/ror-elastic). Both share behavior scenarios in `contracts/search-cases.json`.
 
-## Overview
+Local POC only: Elasticsearch runs single-node with security disabled. Never expose it publicly.
 
-POC to demonstrate full-text search with Elasticsearch. Core use case: given a query like "Red Car", find and rank documents that match in the `title`, `short_description`, and `content` fields, prioritizing matches in the title. The POC is in English — it is intended for a demo with an international team.
-
-The POC will progressively demonstrate:
-
-- Relevance via `simple_query_string` with per-field boosts and Google-style operators
-- Highlighting of matched snippets
-- Typo tolerance (`fuzziness: AUTO`)
-- Autocomplete via the `completion` field
-- Facets / aggregations by genre and year
-
-## Stack
-
-| Layer       | Technology                                       | Status         |
-| ----------- | ------------------------------------------------ | -------------- |
-| Search      | Elasticsearch 8.13.4 (single-node, security off) | Part 1 ✅      |
-| Admin UI    | Kibana 8.13.4 (Dev Tools)                        | Part 1 ✅      |
-| Ingestion   | Node.js + `@elastic/elasticsearch` client        | Part 2 ✅      |
-| Data source | TMDB API (API key required)                      | Part 2 ✅      |
-| Backend     | Node.js + Express                                | Part 3 ✅      |
-| Frontend    | Vue 3 + Vite                                     | Part 4 ✅      |
-
-## Planned structure
-
+## Layout
 ```
-poc-elastic/
-├── docker-compose.yml        # ES + Kibana
-├── mappings/
-│   └── movies.json           # PUT /movies — analyzer and schema
-├── ingestion/                # (Part 2) Node seed script using TMDB
-├── backend/                  # (Part 3) Express API with /search
-├── frontend/                 # (Part 4) Vue 3 + Vite
-├── README.md                 # step-by-step for the current part
-└── CLAUDE.md                 # this file
+backend/      Express API (translates request params -> ES Query DSL), has tests
+frontend/     Vue 3 + Vite UI (dev server proxies /api/* -> Express :3000)
+ingestion/    Node script (seed.js): TMDB fetch -> genre mapping -> ES bulk index
+mappings/     movies.json — index mapping + english_analyzer + title.suggest
+contracts/    search-cases.json — behavior fixtures shared with ror-elastic
+Makefile      Single entry point for all workflows
+docker-compose.yml   Elasticsearch + Kibana
 ```
 
-## How to run (current state)
+## Commands (run from repo root)
+| Task | Command |
+|---|---|
+| Full setup (env, infra, deps) | `make setup` |
+| Start/stop ES + Kibana | `make up` / `make down` |
+| Ingest/update (keeps index) | `make ingest PAGES=25` |
+| Recreate index + ingest | `make ingest-reset CONFIRM_RESET=1 PAGES=25` |
+| Tests / frontend build / both | `make test` / `make build` / `make verify` |
+| Run API / frontend (separate terminals) | `make backend` / `make frontend` |
+| Health / index inspection / smoke | `make health` / `make index-info` / `make api-smoke` |
 
-```bash
-docker compose up -d
-curl http://localhost:9200          # should return JSON with cluster_name
-open http://localhost:5601          # Kibana → Dev Tools
-```
+`make help` lists everything. `sync` / `sync-reset` are Rails-compatible aliases of `ingest` / `ingest-reset`.
+Helper overrides: `ES_URL`, `BACKEND_URL`, `INDEX`.
 
-Paste the contents of [mappings/movies.json](mappings/movies.json) into Dev Tools and execute it to create the index.
+## Services
+Elasticsearch `:9200` · Kibana `:5601` · Express API `:3000` · Vite `:5173`
 
-### Useful commands
+## Environment
+- `backend/.env`: `PORT` (3000), `ES_URL` (http://localhost:9200), `INDEX` (movies)
+- `ingestion/.env`: TMDB v3 API key or v4 Read Access Token (`TMDB_API_KEY`), page count (default 5 pages ≈ 100 records)
+- `make setup-env` creates these only if missing. **Never commit `.env` files or credentials.**
+- Requires Docker/Compose, Node 18+, npm.
 
-```bash
-docker compose up -d                            # start
-docker compose logs -f elasticsearch            # tail ES logs
-docker compose down                             # stop (data preserved)
-docker compose down -v                          # stop and wipe volume (full reset)
-```
+## API (Express, port 3000, no `/api` prefix)
+- `GET /health` — 200 if ES reachable, else 503
+- `GET /search` — `q`, `genres` (comma-separated, exact), `minRating` (0–10), `from` (>=0, default 0), `size` (1–50, default 20). Response: `hits`, `facets`, `took_ms`
+- `GET /suggest?q=&size=` — completion on `title.suggest`, fuzzy, skip duplicates; size 1–10
+- `GET /movies/:id` — by TMDB ID; 404 if not indexed
+- Invalid params -> 400; unexpected errors -> generic 500.
 
-## Conventions and decisions
+## Search semantics (keep stable; parity depends on them)
+- `simple_query_string`, default operator `OR` (recall). A query with an exclusion (`"Spider-Man" -Homecoming`) switches to `AND`.
+- Supports phrases, `+` required, `-` excluded, wildcard prefix, fuzzy, grouping.
+- A separate phrase clause **boosts** ranking; it is not mandatory.
+- Filters (genres, rating) do not affect scoring.
+- Sort: text query = score, popularity, TMDB ID; browse (empty `q`) = popularity, TMDB ID.
+- Response includes genre facets, 5-year histogram facets, `<mark>` highlights.
 
-- **Field names in English** (`title`, `genres`, `year`, `release_date`, `vote_average`, `popularity`). Keep consistent across ingestion, backend, and frontend.
-- **Single analyzer `english_analyzer`** chains `english_possessive_stemmer` + `lowercase` + `asciifolding` + English stopwords + English stemmer. Ensures "running cars" matches "car runs" and possessives like "Disney's" are normalized.
-- **Search strategy — `simple_query_string`** (implemented in Part 3). Preferred over `multi_match` for user-facing input because it gracefully ignores syntax errors instead of failing the whole query. Supports Google-style operators out of the box:
-  - `"exact phrase"` — phrase search
-  - `+term` — term is required
-  - `-term` — exclude documents containing term
-  - `term*` — prefix search
-  - `term~2` — fuzzy match (edit distance 2)
-  - `(group)` — grouping
-  - `a | b` — OR between expressions
-  ```json
-  {
-    "simple_query_string": {
-      "query": "<user input>",
-      "fields": ["title^3", "short_description^2", "content^1"],
-      "default_operator": "OR"
-    }
-  }
-  ```
-  The `default_operator` switches dynamically: **OR** for broad recall on plain queries, **AND** when the input contains `-` (exclusion), because `OR + MUST_NOT` degenerates in Lucene and exclusions stop working.
-  A secondary `multi_match` with `type: "phrase"` runs in the `should` clause to boost documents where query terms appear adjacent, improving ranking even when the user doesn't quote phrases.
-  - Refs: [ES docs](https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-simple-query-string-query) · [Google search operators](https://support.google.com/websearch/answer/2466433?hl=en)
-- **Multi-fields on `title`**: `text` (search), `keyword` (sort/exact), `completion` (autocomplete).
-- **Never expose Elasticsearch directly to the frontend.** The Express layer in Part 3 acts as a search proxy — better security and a single place to customize query/ranking.
-- **Single-node, 1 shard, 0 replicas.** It's a POC; replication adds no value here.
-- **ES heap**: Elastic's rule of thumb is 50% of available RAM, max ~31GB. Adjust `ES_JAVA_OPTS=-Xms<N>g -Xmx<N>g` in docker-compose based on real volume.
-- **Security disabled** (`xpack.security.enabled=false`) — only for local POC use. Do not carry this setting into any environment beyond localhost.
+## Index and ingestion
+- Index `movies`; TMDB ID is the ES `_id` (re-ingesting updates the same doc).
+- Fields: `tmdb_id, title, original_title, short_description, overview, content, genres, year, release_date, original_language, popularity, vote_average, poster_url, poster_path, backdrop_path`.
+- Analysis: English stemming + accent folding (`english_analyzer`).
+- Ingestion logs failed bulk items with IDs/reasons and exits non-zero on any failure.
+- **Mapping changes require recreating the index** (`make ingest-reset CONFIRM_RESET=1`).
 
-## Where decisions live
+## Rules for working in this repo
+- `ingest-reset` deletes the index — only run when explicitly intended; it needs `CONFIRM_RESET=1`.
+- Don't change the response envelope (`hits`) to match Rails (`items`); parity is checked by document IDs, filter correctness, exclusions and relative ordering — **not** exact `_score`.
+- Behavior changes should update `contracts/search-cases.json` and stay compatible with `ror-elastic`.
+- Keep Makefile target names aligned with `ror-elastic` where purposes overlap.
+- Verify with `make verify`; `make api-smoke` needs the backend running and a populated index.
 
-- [README.md](README.md) — executable step-by-step for the current part (concrete instructions for the user to run).
-- [CLAUDE.md](CLAUDE.md) — this file, persistent project view: stack, conventions, decisions.
-- `mappings/*.json` — versioned schema for each index.
+## Troubleshooting
+- TMDB auth error -> check `TMDB_API_KEY` in `ingestion/.env`
+- ES unavailable -> `make up`, `make logs`, check `ES_URL`
+- No results -> confirm ingestion ran, `make index-info`
+- Analyzer debugging: Kibana Dev Tools `POST /movies/_analyze`
 
-## Status by part
-
-- **Part 1 — Infra + Mapping** ✅ docker-compose, `movies` mapping, and this CLAUDE.md ready.
-- **Part 2 — TMDB ingestion** ✅ `ingestion/seed.js` fetches from TMDB and bulk-indexes via `--reset`. Run with `cd ingestion && npm install && npm run seed -- --reset`.
-- **Part 3 — Express backend** ✅ `backend/` exposes `/search`, `/suggest`, `/movies/:id`, `/health` on port 3000. Search DSL (`simple_query_string`, per-field boosts, phrase boost, highlight, aggs) lives in `backend/searchService.js`. Run with `cd backend && npm install && npm start`.
-- **Part 4 — Vue frontend** ✅ `frontend/` is a Vite + Vue 3 SPA on port 5173. Components: `SearchBar` (autocomplete + "Search tips" link), `SearchHelpModal` (documents Google-style search operators), `FacetSidebar` (genres + rating slider), `MovieGrid`, `MovieCard` (poster + highlighted title/desc + score). Vite proxies `/api/*` to backend. Run with `cd frontend && npm install && npm run dev`.
+## Differences vs ror-elastic
+| | poc-elastic | ror-elastic |
+|---|---|---|
+| Backend | Express | Rails 8 |
+| Frontend | Vue 3 + Vite (:5173) | Nuxt 4 (:3001) |
+| Ingestion | separate Node script | Rails TMDB sync service |
+| Routes | `/search`, `/suggest`, `/health` | `/api/search`, `/api/suggest`, `/api/health` |
+| Result key | `hits` | `items` |
+| Min rating param | `minRating` | `min_rating` (also `minRating`) |
+| Mapping defined in | `mappings/movies.json` | `Movie` model |
