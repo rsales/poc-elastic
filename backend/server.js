@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { search, suggest, getById, es } from './searchService.js';
 import { queryScalar, parseInteger, parseRating } from './validation.js';
+import { emptySearchResponse, isElasticsearchBadRequest } from './searchErrors.js';
 
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
@@ -40,7 +41,19 @@ app.get('/search', async (req, res, next) => {
     const minRating = parseRating(minRatingValue);
     const genres = genresValue.split(',').map(s => s.trim()).filter(Boolean);
 
-    const result = await search({ q: q.trim(), genres, minRating, from, size });
+    let result;
+    try {
+      result = await search({ q: q.trim(), genres, minRating, from, size });
+    } catch (e) {
+      // Match the Rails UX contract: Elasticsearch query parsing errors must
+      // not turn an incomplete search-as-you-type expression into HTTP 500.
+      // Request-parameter validation runs before this block and still returns 400.
+      if (isElasticsearchBadRequest(e)) {
+        console.warn(`GET /search malformed query normalized to empty results: ${e.message}`);
+        return res.json(emptySearchResponse());
+      }
+      throw e;
+    }
     console.log(`GET /search q="${q}" genres="${genresValue}" min=${minRating ?? '-'} hits=${result.total} took=${Date.now() - req._start}ms`);
     res.json(result);
   } catch (e) {

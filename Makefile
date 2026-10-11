@@ -2,15 +2,26 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 PAGES ?=
-ES_URL ?= http://localhost:9200
-BACKEND_URL ?= http://localhost:3000
+ES_PORT ?= 9200
+ES_TRANSPORT_PORT ?= 9300
+KIBANA_PORT ?= 5601
+ES_HEAP_SIZE ?= 2g
+ES_MEM_LIMIT ?= 3g
+API_PORT ?= 3000
+FRONTEND_PORT ?= 5173
+ES_URL ?= http://localhost:$(ES_PORT)
+BACKEND_URL ?= http://localhost:$(API_PORT)
 INDEX ?= movies
+CONTRACT_INDEX ?= movies-contract-test
+CONTRACT_SETUP_INDEX ?= 0
+NODE_API_URL ?= http://localhost:$(API_PORT)
+RAILS_API_URL ?= http://localhost:3100
 
 .PHONY: help setup setup-env setup-backend setup-ingestion setup-frontend \
         up down logs wait-es health elastic kibana \
         install install-backend install-ingestion install-frontend \
         ingest ingest-reset sync sync-reset test test-backend build verify \
-        backend frontend index-info api-smoke smoke
+        backend frontend index-info api-smoke smoke contract-smoke
 
 help: ## List available local development commands
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -40,7 +51,7 @@ setup-frontend: ## Install Vue/Vite frontend dependencies
 	$(MAKE) install-frontend
 
 up: ## Start Elasticsearch and Kibana
-	docker compose up -d
+	ES_PORT=$(ES_PORT) ES_TRANSPORT_PORT=$(ES_TRANSPORT_PORT) KIBANA_PORT=$(KIBANA_PORT) ES_HEAP_SIZE=$(ES_HEAP_SIZE) ES_MEM_LIMIT=$(ES_MEM_LIMIT) docker compose up -d
 
 down: ## Stop containers without deleting the Elasticsearch data volume
 	docker compose down
@@ -65,7 +76,7 @@ elastic: ## Open Elasticsearch in the browser (macOS)
 	open "$(ES_URL)"
 
 kibana: ## Open Kibana in the browser (macOS)
-	open http://localhost:5601
+	open http://localhost:$(KIBANA_PORT)
 
 install: install-backend install-ingestion install-frontend ## Install all Node.js dependencies
 
@@ -79,11 +90,11 @@ install-frontend: ## Install Vue/Vite frontend dependencies
 	cd frontend && npm install
 
 ingest: wait-es ## Ingest or update TMDB movies without deleting the index
-	cd ingestion && npm run seed -- $(if $(PAGES),--pages=$(PAGES),)
+	cd ingestion && ES_URL=$(ES_URL) INDEX=$(INDEX) npm run seed -- $(if $(PAGES),--pages=$(PAGES),)
 
 ingest-reset: wait-es ## Recreate the index and ingest movies (requires CONFIRM_RESET=1)
 	@test "$(CONFIRM_RESET)" = "1" || (echo "Destructive: this recreates the configured Elasticsearch index. Run: make ingest-reset CONFIRM_RESET=1 [PAGES=25]" >&2; exit 1)
-	cd ingestion && npm run seed -- --reset $(if $(PAGES),--pages=$(PAGES),)
+	cd ingestion && ES_URL=$(ES_URL) INDEX=$(INDEX) npm run seed -- --reset $(if $(PAGES),--pages=$(PAGES),)
 
 sync: ingest ## Shared alias for ingest
 
@@ -100,10 +111,10 @@ build: ## Build the Vue frontend for production
 verify: test build ## Run backend tests and build the frontend
 
 backend: ## Start the Express API
-	cd backend && npm start
+	cd backend && PORT=$(API_PORT) ES_URL=$(ES_URL) INDEX=$(INDEX) npm start
 
 frontend: ## Start the Vite development server
-	cd frontend && npm run dev
+	cd frontend && BACKEND_URL=$(BACKEND_URL) FRONTEND_PORT=$(FRONTEND_PORT) npm run dev -- --port $(FRONTEND_PORT)
 
 index-info: ## Show Elasticsearch metadata for the configured index
 	curl --silent --show-error --fail "$(ES_URL)/_cat/indices/$(INDEX)?v"
@@ -115,3 +126,6 @@ api-smoke: ## Check health, search, and suggestions (backend must be running)
 	echo "== Suggestions =="; curl --silent --show-error --fail "$(BACKEND_URL)/suggest?q=spi"; echo
 
 smoke: api-smoke ## Alias for api-smoke
+
+contract-smoke: ## Run shared behavioral contract against Node and Rails APIs
+	CONTRACT_SETUP_INDEX=$(CONTRACT_SETUP_INDEX) CONTRACT_ES_URL=$(ES_URL) CONTRACT_INDEX=$(CONTRACT_INDEX) NODE_API_URL=$(NODE_API_URL) RAILS_API_URL=$(RAILS_API_URL) node scripts/search-contract.mjs
